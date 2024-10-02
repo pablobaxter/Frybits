@@ -1,0 +1,54 @@
+site_name: Frybits
+site_description: All about Frybits projects
+site_url: https://www.frybits.com
+remote_branch: gh-pages
+site_author: Pablo Baxter
+
+copyright: 'Copyright &copy; 2024 Pablo Baxter'
+
+theme:
+  logo: assets/images/icon.png
+  favicon: assets/images/icon.png
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: purple
+      toggle:
+        icon: octicons/sun-24
+        name: "Switch to Dark Mode"
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: purple
+      toggle:
+        icon: octicons/moon-24
+        name: "Switch to Light Mode"
+      
+  features:
+    - navigation.tabs
+    - toc.integrate
+    - navigation.indexes
+
+plugins:
+  - blog
+
+markdown_extensions:
+  - admonition
+  - pymdownx.critic
+  - attr_list
+  - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji 
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Welcome:
+    - index.md
+    - About: about.md
+  # - Blog:
+  #   - blog/index.md
+  #   - Medium Articles:
+  #     - What Happened to my Subclass Android Application?: https://medium.com/@pablobaxter/what-happened-to-my-subclass-android-application-924c91bafcac
+  #     - Harmony — Multiprocess SharedPreferences: https://medium.com/swlh/harmony-sharedpreferences-4d0fb500907e
