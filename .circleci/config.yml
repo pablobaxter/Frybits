@@ -15,4 +15,5 @@ jobs:
 workflows:
   version: 2
     publishing:
-      - publish
+      jobs:
+        - publishing
