@@ -1,0 +1,18 @@
+version: 2.1
+
+jobs:
+  publish:
+    docker:
+      - image: cimg/python:3.12.6
+    steps:
+      - checkout
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+      - run: pip install mkdocs-material
+      - run: mkdocs gh-deploy --force
+
+workflows:
+  version: 2
+    publishing:
+      - publish
