@@ -11,9 +11,3 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
       - run: pip install mkdocs-material
       - run: mkdocs gh-deploy --force
-
-workflows:
-  version: 2
-    publishing:
-      jobs:
-        - publishing
