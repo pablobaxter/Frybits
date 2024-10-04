@@ -14,10 +14,10 @@ jobs:
 
 workflows:
   version: 2
-    publishing:
-      jobs:
-        - publish:
-          filters:
-            branches:
-              only:
-                - main
+  publishing:
+    jobs:
+      - publish:
+        filters:
+          branches:
+            only:
+              - main
