@@ -43,6 +43,15 @@ markdown_extensions:
       emoji_index: !!python/name:material.extensions.emoji.twemoji 
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
+extra:
+  social:
+    - icon: fontawesome/brands/mastodon 
+      link: https://androiddev.social/@pablobaxter
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/in/pablobax/
+    - icon: fontawesome/brands/github
+      link: https://github.com/pablobaxter
+
 nav:
   - Welcome:
     - index.md

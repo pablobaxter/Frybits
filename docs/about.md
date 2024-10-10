@@ -1,7 +1,5 @@
 # About Me
 
-[:material-linkedin:{ .lg .middle } pablobax](https://www.linkedin.com/in/pablobax/) | [:material-github:{ .lg .middle } pablobaxter](https://github.com/pablobaxter) | [:material-mastodon:{ .lg .middle } pablobaxter](https://androiddev.social/@pablobaxter)
-
 <figure markdown="span">
   ![Me and kiddo](assets/images/me.jpg){ loading=lazy }
   <figcaption>Me and my kiddo backpacking</figcaption>
