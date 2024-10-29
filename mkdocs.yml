@@ -32,7 +32,10 @@ theme:
     - navigation.indexes
 
 plugins:
-  - blog
+  - blog:
+      post_url_format: "{slug}"
+      archive: false
+      blog_dir: blog
 
 markdown_extensions:
   - admonition
@@ -56,8 +59,5 @@ nav:
   - Welcome:
     - index.md
     - About: about.md
-  # - Blog:
-  #   - blog/index.md
-  #   - Medium Articles:
-  #     - What Happened to my Subclass Android Application?: https://medium.com/@pablobaxter/what-happened-to-my-subclass-android-application-924c91bafcac
-  #     - Harmony — Multiprocess SharedPreferences: https://medium.com/swlh/harmony-sharedpreferences-4d0fb500907e
+  - Blog:
+    - blog/index.md
