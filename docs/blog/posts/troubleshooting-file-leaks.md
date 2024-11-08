@@ -7,7 +7,7 @@ draft: true
 
 # Detecting File Leak in the Kotlin Daemon
 
-File handle leaks are notoriously difficult to debug, so much so that most of the “fixes” for them are “increase the file descriptor limit”. However, this is not a fix. This is as close as you can get to covering your ears and closing your eyes, then screaming “I DON’T HEAR YOU” to a bug. The file handle leak will still exist, but now it’s ignored.
+File handle leaks are notoriously difficult to debug, so much so that most of the “fixes” for them are “increase the file descriptor limit”. However, this is not a fix. This is as close as you can get to covering your ears and closing your eyes, then screaming “I CAN’T HEAR YOU” to a bug. The file handle leak will still exist, but now it’s ignored.
 
 <figure markdown="span">
   ![img](../../assets/gifs/file-leak.gif){ loading=lazy }
@@ -33,9 +33,9 @@ These issues don't always appear on every run and could be intermittent as well.
 
 ## Noticing the Kotlin Daemon File Handle Leak
 
-Going back to how I found the Kotlin daemon file handle leak, as I had mentioned previously, it was due to curiosity and dumb luck. When Paul Klauser [reported a metaspace leak](https://youtrack.jetbrains.com/issue/KT-72169/Kotlin-Daemon-Metaspace-leak) occuring in the Kotlin daemon, I was curious if this metaspace leak was potentially due to a file handle leak, as I had been tracking one in the Gradle daemon (which I still haven't found).
+Going back to how I found the Kotlin daemon file handle leak, as I had mentioned previously, I found it due to curiosity and dumb luck. When Paul Klauser [reported a metaspace leak](https://youtrack.jetbrains.com/issue/KT-72169/Kotlin-Daemon-Metaspace-leak) occuring in the Kotlin daemon, I was curious if this metaspace leak was potentially due to a file handle leak, as I had been tracking one in the Gradle daemon (which I still haven't found).
 
-At a high-level (technical details below), I attached Jenkin's [file-leak-detector](https://github.com/jenkinsci/lib-file-leak-detector) to the Kotlin daemon, and ran `./gradlew clean assembleDebug --rerun-tasks` several times and capturing the output of the file leak tool and using a post-processor (see [https://github.com/centic9/file-leak-postprocess](https://github.com/centic9/file-leak-postprocess)) to make the logs easier to read. I ended up with a file containing many stacktraces that show where the file was opened. Many of them looked like the following (shortened for easy reading):
+To go over how I did this at a high-level (more info later on), I attached Jenkin's [file-leak-detector](https://github.com/jenkinsci/lib-file-leak-detector) to the Kotlin daemon, and ran `./gradlew clean assembleDebug --rerun-tasks` several times and capturing the output of the file leak tool and using a post-processor (see [https://github.com/centic9/file-leak-postprocess](https://github.com/centic9/file-leak-postprocess)) to make the logs easier to read. I ended up with a file containing many stacktraces that show where the file was opened. Many of them looked like the following (shortened for easy reading):
 
 ``` text title="Actual file leak ouput" linenums="1"
 // Several hundred other open files up here with the same stacktrace
@@ -49,6 +49,13 @@ At a high-level (technical details below), I attached Jenkin's [file-leak-detect
 	at java.base/jdk.internal.loader.URLClassPath$JarLoader$1.run(URLClassPath.java:769)
 	at java.base/jdk.internal.loader.URLClassPath$JarLoader$1.run(URLClassPath.java:762)
     ...
+	at java.base/java.net.URLClassLoader$3.next(URLClassLoader.java:659)
+	at java.base/java.net.URLClassLoader$3.hasMoreElements(URLClassLoader.java:684)
+	at java.base/java.lang.CompoundEnumeration.next(ClassLoader.java:2730)
+	at java.base/java.lang.CompoundEnumeration.hasMoreElements(ClassLoader.java:2739)
+	at java.base/java.util.ServiceLoader$LazyClassPathLookupIterator.nextProviderClass(ServiceLoader.java:1210)
+	at java.base/java.util.ServiceLoader$LazyClassPathLookupIterator.hasNextService(ServiceLoader.java:1228)
+	at java.base/java.util.ServiceLoader$LazyClassPathLookupIterator.hasNext(ServiceLoader.java:1273)
 	at java.base/java.util.ServiceLoader$2.hasNext(ServiceLoader.java:1309)
 	at java.base/java.util.ServiceLoader$3.hasNext(ServiceLoader.java:1393)
 	at com.google.common.collect.ImmutableSet.copyOf(ImmutableSet.java:280)
@@ -70,17 +77,48 @@ At a high-level (technical details below), I attached Jenkin's [file-leak-detect
 
 > So what's going on here and how does this tell the story of a file leak?
 
-Well, this stacktrace actually represents 417 files were opened and never closed, but for brevity, I only listed the final three files left open (lines 3-5). These were 
+Well, this stacktrace actually represents 417 files were opened and never closed when the Gradle task was completed, but for brevity, I only listed the final three files left open (lines 3-5). All these files were opened at the `ZipFile` constructor (line 6), however that is not where the origin of the file was at. It actually originated elsewhere in this stacktrace, which required some investigation. Also, this is just one stacktrace for the given set of files. There were 1380 files left open at the end of the Gradle task run, and about another 1k extra files were opened after each run. In the following sections, I'll get into the details of how I debugged this file leak and found the fix for it.
 
-So I performed the following setup in the [NowInAndroid](https://github.com/android/nowinandroid) repo, which is what Paul Klauser used to report the metaspace leak.
+## Setting Up the file-leak-detector
 
-### File Handle Leak Tooling
-
-
-
+To begin with, I downloaded the [file-leak-detector](https://github.com/jenkinsci/lib-file-leak-detector) jar, and in the root `gradle.properties` file of the [NowInAndroid](https://github.com/android/nowinandroid) repo, I appended the following line to the JVM args of the Kotlin daemon:
 
 ```properties title="gradle.properties"
-
-kotlin.daemon.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=320m -XX:+HeapDumpOnOutOfMemoryError -Xmx4g -Xms4g -javaagent:/path/to/
-
+kotlin.daemon.jvmargs=<other args> -javaagent:/path/to/file-leak-detector-jar-with-dependencies.jar=http=19999
 ```
+
+What this does is attach the file-leak-detector Java Agent to each Kotlin daemon that is launched. Since I only want one Kotlin daemon running, I made sure to kill the other Kotlin daemon processes before running the Gradle command.
+
+The flag `http=19999` creates a local web server on port `19999` that the file-leak-detector uses to provide a list of all the open files and stacktraces to them. This is important as the Kotlin daemon is a long lived process, so it doesn't exit when the build has completed.
+
+## Capturing the File Handle Leak
+
+Getting this file handle leak to occur was a bit tricky. I had to determine the task that would trigger the Kotlin compiler, and ensure that consecutive executions were re-run properly. For this reason I chose to run `./gradlew clean assembleDebug --rerun-tasks` in order to ensure that the compilation occurred each time.
+
+So what does each part do?
+
+  * `clean` ensures that no generated code exists, and gives me a clean build directory.
+  * `assembleDebug` triggers the compilation of the Android app in NowInAndroid.
+  * `--rerun-tasks` tells the Gradle daemon to ignore any up-to-date checks from tasks and rerun them all.
+
+After the first successful build of NowInAndroid using the above command, I was able to go to `localhost:19999`, which output all the open files left on the Kotlin daemon. That's where I got my first indication that something may be wrong, as I was left with 1380 file handles left open. This didn't necessarily mean there was a file leak, as these open file handles could be cached. To be sure, I stored this result as a text file, and re-ran the Gradle command while making sure the Kotlin daemon was not restarted or killed.
+
+The next run left me with 2694 open file handles, with each run opening another ~1k files. This was obviously a leak. I stored the results of each run in a text file for post-processing, to make it easier to read.
+
+## Analyzing the Results
+
+The [file-leak-postprocess](https://github.com/centic9/file-leak-postprocess) tool is useful as it gets all the open file handles that share a similar stacktrace and groups them together (see output above). I ran this post-processor tool for each output I collected, and took a quick look to see where most of these files were being opened. Visual Studio Code does a great job visualizing which stacktraces have the most open file handles.
+
+<figure markdown="span">
+  ![img](../../assets/images/file-leak-post-processed.png){ loading=lazy }
+  <figcaption>That's a lot of open files!</figcaption>
+</figure>
+
+With this, I saw that there was a cluster of open files that shared common stacktraces. What I needed to identify was which of these grew on consecutive runs, as that would determine the location of the leaks. Again, Visual Studio Code came handy with their "Compare Selected" option when 2 files are selected in the file navigation. However, this comparison was a bit confusing to me at first.
+
+<figure markdown="span">
+  ![img](../../assets/images/file-leak-comparison.png){ loading=lazy }
+  <figcaption>Comparing the base to another run</figcaption>
+</figure>
+
+Typically, I would only see new files added to specific stacktraces that pointed out the leaks, yet here we had the previous files being closed and 
