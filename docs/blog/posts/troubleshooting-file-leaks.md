@@ -2,7 +2,6 @@
 date: 2024-10-17
 authors:
     - pablobaxter
-draft: true
 ---
 
 # Detecting File Leak in the Kotlin Daemon
@@ -33,9 +32,9 @@ These issues don't always appear on every run and could be intermittent as well.
 
 ## Noticing the Kotlin Daemon File Handle Leak
 
-Going back to how I found the Kotlin daemon file handle leak, as I had mentioned previously, I found it due to curiosity and dumb luck. When Paul Klauser [reported a metaspace leak](https://youtrack.jetbrains.com/issue/KT-72169/Kotlin-Daemon-Metaspace-leak) occuring in the Kotlin daemon, I was curious if this metaspace leak was potentially due to a file handle leak, as I had been tracking one in the Gradle daemon (which I still haven't found).
+Going back to how I found the Kotlin daemon file handle leak, as I had mentioned previously, I found it due to curiosity and dumb luck. When Paul Klauser ([https://github.com/PaulKlauser](https://github.com/PaulKlauser)) reported a [metaspace leak](https://youtrack.jetbrains.com/issue/KT-72169/Kotlin-Daemon-Metaspace-leak) occuring in the Kotlin daemon, I was curious if this metaspace leak was potentially due to a file handle leak, as I had been tracking one in the Gradle daemon (which I still haven't found).
 
-To go over how I did this at a high-level (more info later on), I attached Jenkin's [file-leak-detector](https://github.com/jenkinsci/lib-file-leak-detector) to the Kotlin daemon, and ran `./gradlew clean assembleDebug --rerun-tasks` several times and capturing the output of the file leak tool and using a post-processor (see [https://github.com/centic9/file-leak-postprocess](https://github.com/centic9/file-leak-postprocess)) to make the logs easier to read. I ended up with a file containing many stacktraces that show where the file was opened. Many of them looked like the following (shortened for easy reading):
+To go over how I did this at a high-level (more details later on), I attached Jenkin's [file-leak-detector](https://github.com/jenkinsci/lib-file-leak-detector) to the Kotlin daemon and ran `./gradlew clean assembleDebug --rerun-tasks` several times, capturing the output of the file leak tool and using a post-processor (see [https://github.com/centic9/file-leak-postprocess](https://github.com/centic9/file-leak-postprocess)) to make the logs easier to read. I ended up with a file containing many stacktraces that show where the file was opened. Many of them looked like the following (shortened for easy reading):
 
 ``` text title="Actual file leak ouput" linenums="1"
 // Several hundred other open files up here with the same stacktrace
@@ -77,7 +76,7 @@ To go over how I did this at a high-level (more info later on), I attached Jenki
 
 > So what's going on here and how does this tell the story of a file leak?
 
-Well, this stacktrace actually represents 417 files were opened and never closed when the Gradle task was completed, but for brevity, I only listed the final three files left open (lines 3-5). All these files were opened at the `ZipFile` constructor (line 6), however that is not where the origin of the file was at. It actually originated elsewhere in this stacktrace, which required some investigation. Also, this is just one stacktrace for the given set of files. There were 1380 files left open at the end of the Gradle task run, and about another 1k extra files were opened after each run. In the following sections, I'll get into the details of how I debugged this file leak and found the fix for it.
+Well, this stacktrace actually represents 417 files that were opened and never closed when the Gradle task was completed, but for brevity, I only listed the final three files left open (lines 3-5). All these files were opened at the `ZipFile` constructor (line 6), however that is not where the origin of the file was at. It actually originated elsewhere in this stacktrace, which required some investigation. Also, this is just one stacktrace for the given set of files. There were 1380 files left open at the end of the Gradle task run, and about another 1k extra files were opened after each run. In the following sections, I'll get into the details of how I debugged this file leak and found the fix for it.
 
 ## Setting Up the file-leak-detector
 
@@ -121,4 +120,12 @@ With this, I saw that there was a cluster of open files that shared common stack
   <figcaption>Comparing the base to another run</figcaption>
 </figure>
 
-Typically, I would only see new files added to specific stacktraces that pointed out the leaks, yet here we had the previous files being closed and 
+Typically, I would only see new files added to specific stacktraces that pointed out the leaks, yet here we had the previous files being closed and an increasing number of new files being opened. At first, I believed this to be due to a collection that was growing after each run, however I was not able to find any evidence to support this theory. The next approach I took was looking at the stacktraces and understanding a common root for them all. Thankfully, I had [Jason Pearson](https://www.jasonpearson.dev/) in a Slack thread helping me out identify this common root, which he pointed out to be `org.jetbrains.kotlin.cli.jvm.K2JVMCompiler.doExecute(K2JVMCompiler.kt:43)`.
+
+Now that I knew the general area of where the file leaks were occurring, I was able to dig a bit deeper to understand the root cause, and discovered that both the [Kotlin source code](https://github.com/JetBrains/kotlin/blob/6af99c83470813023dace7d3bd850c6fef8e50c0/compiler/cli/src/org/jetbrains/kotlin/cli/jvm/plugins/PluginCliParser.kt#L161-L163) and [KSP source code](https://github.com/google/ksp/blob/1ca8ca1793afdea491d9afebd12a27388c500874/compiler-plugin/src/main/kotlin/com/google/devtools/ksp/KotlinSymbolProcessingExtension.kt#L86-L95) were creating `URLClassloader` objects, but never closing them. By default, `URLClassloader` caches the underlying `.jar` files being opened, and keeps them open until the `URLClassloader` has closed or has been garbage collected (see: [Closing a URLClassLoader](https://docs.oracle.com/javase/7/docs/technotes/guides/net/ClassLoader.html)). With this finding, I filed a bug with the [Kotlin team](https://youtrack.jetbrains.com/issue/KT-72172/File-Leak-occurring-in-Kotlin-Daemon) and with the [Google/KSP team](https://github.com/google/ksp/issues/2159).
+
+## Patching the File Handle Leaks
+
+The fix for these file leaks was rather easy for KSP. I just needed to call `URLClassloader.close()`. This was quickly achieved in [this PR](https://github.com/google/ksp/pull/2164). Testing was a bit more difficult, but after working with the KSP team, I was able to test a local build of it on NowInAndroid and verified the file leaks for KSP were gone!
+
+As for the Kotlin project fix, I made an attempt at a [fix](https://github.com/JetBrains/kotlin/pull/5372), but it turned that it would require quite a bit [more effort](https://github.com/JetBrains/kotlin/commit/8c6390b1e9ba16c1bf05df34205584f80530f34e). Essentially, there were many paths to open a `URLClassloader`, and my PR didn't cover all of those. Thankfully, [Brian Norman](https://github.com/bnorm) on the Kotlin team took the charge on this fix!
