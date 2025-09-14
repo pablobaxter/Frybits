@@ -2,18 +2,18 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://www.frybits.com/</loc>
-         <lastmod>2025-02-11</lastmod>
+         <lastmod>2025-09-14</lastmod>
     </url>
     <url>
          <loc>https://www.frybits.com/about/</loc>
-         <lastmod>2025-02-11</lastmod>
+         <lastmod>2025-09-14</lastmod>
     </url>
     <url>
          <loc>https://www.frybits.com/blog/</loc>
-         <lastmod>2025-02-11</lastmod>
+         <lastmod>2025-09-14</lastmod>
     </url>
     <url>
          <loc>https://www.frybits.com/blog/detecting-file-leak-in-the-kotlin-daemon/</loc>
-         <lastmod>2025-02-11</lastmod>
+         <lastmod>2025-09-14</lastmod>
     </url>
 </urlset>
